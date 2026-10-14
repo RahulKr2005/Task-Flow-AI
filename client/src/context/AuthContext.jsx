@@ -33,10 +33,12 @@ export const AuthProvider = ({ children }) => {
     return res.data;
   };
 
-  const register = async (name, email, password, confirmPassword) => {
+  const register = async (name, email, password, confirmPassword, autoLogin = false) => {
     const res = await api.post('/auth/register', { name, email, password, confirmPassword });
-    localStorage.setItem('taskflow_token', res.data.token);
-    setUser(res.data.user);
+    if (autoLogin && res.data.token) {
+      localStorage.setItem('taskflow_token', res.data.token);
+      setUser(res.data.user);
+    }
     return res.data;
   };
 

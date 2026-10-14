@@ -1,3 +1,4 @@
+# TaskFlow AI Netlify Configuration
 [build]
   base = "client"
   command = "npm run build"

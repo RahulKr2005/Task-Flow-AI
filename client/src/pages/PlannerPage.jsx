@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../services/api';
 import {
   Calendar,
@@ -9,34 +10,69 @@ import {
   RefreshCw,
   AlertCircle,
   Coffee,
+  PlusCircle,
+  LogIn,
 } from 'lucide-react';
 
 const PlannerPage = () => {
-  const [schedule, setSchedule] = useState([]);
+  const [schedule, setSchedule] = useState(() => {
+    try {
+      const saved = localStorage.getItem('taskflow_daily_schedule');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [completedItems, setCompletedItems] = useState(() => {
+    try {
+      const saved = localStorage.getItem('taskflow_completed_planner_items');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [completedItems, setCompletedItems] = useState({});
+  const [errorCode, setErrorCode] = useState('');
 
   const generatePlan = async () => {
+    if (loading) return; // Prevent duplicate requests
     try {
       setLoading(true);
       setError('');
+      setErrorCode('');
       const res = await api.post('/ai/daily-plan');
-      setSchedule(res.data.schedule || []);
+      const newSchedule = res.data?.schedule || [];
+      setSchedule(newSchedule);
+      localStorage.setItem('taskflow_daily_schedule', JSON.stringify(newSchedule));
     } catch (err) {
-      setError(err.message || 'Failed to generate AI Daily Plan. Ensure GEMINI_API_KEY is configured.');
+      console.error('[AI Planner Frontend Error]:', err);
+      setError(err.message || 'Failed to generate AI Daily Plan.');
+      setErrorCode(err.code || '');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    generatePlan();
+    // If no plan is cached, auto-generate on page load
+    const saved = localStorage.getItem('taskflow_daily_schedule');
+    if (!saved || JSON.parse(saved || '[]').length === 0) {
+      generatePlan();
+    }
   }, []);
 
   const toggleItemCompletion = async (index, taskId) => {
     const isDone = !completedItems[index];
-    setCompletedItems((prev) => ({ ...prev, [index]: isDone }));
+    const updated = { ...completedItems, [index]: isDone };
+    setCompletedItems(updated);
+    try {
+      localStorage.setItem('taskflow_completed_planner_items', JSON.stringify(updated));
+    } catch (e) {
+      // Ignore localStorage errors
+    }
 
     // If item links to a real task in DB, update status
     if (taskId && taskId !== 'null') {
@@ -68,7 +104,7 @@ const PlannerPage = () => {
           <button
             onClick={generatePlan}
             disabled={loading}
-            className="w-full sm:w-auto px-5 py-2.5 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-700 rounded-xl transition-colors shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
+            className="w-full sm:w-auto px-5 py-2.5 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-700 rounded-xl transition-colors shadow-md flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             {loading ? (
               <>
@@ -91,14 +127,36 @@ const PlannerPage = () => {
       </div>
 
       {error && (
-        <div className="p-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-400 text-sm rounded-xl flex items-center justify-between">
+        <div className="p-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-400 text-sm rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <AlertCircle className="w-5 h-5 shrink-0" />
             <span>{error}</span>
           </div>
-          <button onClick={generatePlan} className="text-xs font-semibold hover:underline flex items-center gap-1">
-            <RefreshCw className="w-3.5 h-3.5" /> Try Again
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            {errorCode === 'NO_TASKS' && (
+              <Link
+                to="/tasks"
+                className="text-xs font-semibold px-3 py-1.5 bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-200 rounded-lg hover:bg-rose-200 dark:hover:bg-rose-900 flex items-center gap-1.5 transition-colors"
+              >
+                <PlusCircle className="w-3.5 h-3.5" /> Go to Tasks
+              </Link>
+            )}
+            {errorCode === 'AUTH_EXPIRED' && (
+              <Link
+                to="/login"
+                className="text-xs font-semibold px-3 py-1.5 bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-200 rounded-lg hover:bg-rose-200 dark:hover:bg-rose-900 flex items-center gap-1.5 transition-colors"
+              >
+                <LogIn className="w-3.5 h-3.5" /> Log In
+              </Link>
+            )}
+            <button
+              onClick={generatePlan}
+              disabled={loading}
+              className="text-xs font-semibold hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Try Again
+            </button>
+          </div>
         </div>
       )}
 
@@ -108,7 +166,7 @@ const PlannerPage = () => {
           <div className="py-20 text-center">
             <Sparkles className="w-10 h-10 text-sky-500 animate-bounce mx-auto mb-3" />
             <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">
-              Generating your optimal daily schedule...
+              Generating your AI-powered daily plan...
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               Gemini AI is calculating task duration, priority, and break intervals.
@@ -125,7 +183,8 @@ const PlannerPage = () => {
             </p>
             <button
               onClick={generatePlan}
-              className="mt-4 px-5 py-2.5 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-700 rounded-xl transition-colors"
+              disabled={loading}
+              className="mt-4 px-5 py-2.5 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-700 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
             >
               Generate My Plan
             </button>

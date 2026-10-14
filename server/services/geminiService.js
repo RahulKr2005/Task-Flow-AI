@@ -8,9 +8,39 @@ const getGenAI = () => {
   return new GoogleGenerativeAI(apiKey);
 };
 
+const extractJsonArray = (text) => {
+  if (!text) return null;
+  let cleaned = text.trim();
+  // Strip markdown code block indicators
+  cleaned = cleaned.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
+
+  // Find bounds of JSON array
+  const firstBracket = cleaned.indexOf('[');
+  const lastBracket = cleaned.lastIndexOf(']');
+  if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+    cleaned = cleaned.substring(firstBracket, lastBracket + 1);
+  }
+
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+  } catch (err) {
+    // Parsing error
+  }
+  return null;
+};
+
 const generateWithFallback = async (prompt) => {
   const genAI = getGenAI();
-  const modelsToTry = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-1.5-flash-8b'];
+  // Use currently active, fast, reliable Gemini models in order of responsiveness & availability
+  const modelsToTry = [
+    'gemini-3.5-flash-lite',
+    'gemini-3.1-flash-lite',
+    'gemini-3.5-flash',
+    'gemini-3.8-flash',
+  ];
   let lastError = null;
 
   for (const modelName of modelsToTry) {
@@ -18,17 +48,19 @@ const generateWithFallback = async (prompt) => {
       const model = genAI.getGenerativeModel({ model: modelName });
       const result = await model.generateContent(prompt);
       const response = await result.response;
-      return response.text() || '';
+      const text = response.text();
+      if (text && text.trim().length > 0) {
+        return text;
+      }
     } catch (err) {
       lastError = err;
-      if (err.message && err.message.includes('404')) {
-        continue;
-      }
-      throw err;
+      // Log model retry without leaking any credentials or prompt secrets
+      console.warn(`[Gemini AI] Model ${modelName} encountered an issue (${err.message ? err.message.substring(0, 100) : 'unknown error'}). Trying next candidate model...`);
+      continue;
     }
   }
 
-  throw lastError || new Error('All candidate Gemini models failed.');
+  throw lastError || new Error('All candidate Gemini models failed to generate content.');
 };
 
 /**
@@ -70,13 +102,16 @@ ${JSON.stringify(tasksSummary, null, 2)}
 `;
 
   try {
-    let responseText = await generateWithFallback(prompt);
-    responseText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+    const responseText = await generateWithFallback(prompt);
+    const parsedResults = extractJsonArray(responseText);
 
-    const parsedResults = JSON.parse(responseText);
+    if (!parsedResults || !Array.isArray(parsedResults)) {
+      throw new Error('Unable to parse JSON array from AI response.');
+    }
+
     return parsedResults;
   } catch (error) {
-    console.error('Gemini Prioritization Error:', error);
+    console.error('Gemini Prioritization Error:', error.message);
     throw new Error(`AI Prioritization failed: ${error.message}`);
   }
 };
@@ -119,13 +154,33 @@ ${JSON.stringify(tasksSummary, null, 2)}
 `;
 
   try {
-    let responseText = await generateWithFallback(prompt);
-    responseText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+    const responseText = await generateWithFallback(prompt);
+    const rawSchedule = extractJsonArray(responseText);
 
-    const schedule = JSON.parse(responseText);
-    return schedule;
+    if (!rawSchedule || !Array.isArray(rawSchedule) || rawSchedule.length === 0) {
+      throw new Error('AI returned an empty or unparseable daily schedule.');
+    }
+
+    // Validate and sanitize each item in schedule
+    const validatedSchedule = rawSchedule
+      .filter((item) => item && typeof item === 'object' && item.task)
+      .map((item, idx) => ({
+        time: item.time || `${9 + idx}:00 AM - ${10 + idx}:00 AM`,
+        task: String(item.task).trim(),
+        priority: ['High', 'Medium', 'Low', 'Break'].includes(item.priority) ? item.priority : 'Medium',
+        estimatedDuration: item.estimatedDuration || '1 hour',
+        taskId: item.taskId && item.taskId !== 'null' && item.taskId !== 'task_id_if_matching_otherwise_null'
+          ? String(item.taskId)
+          : null,
+      }));
+
+    if (validatedSchedule.length === 0) {
+      throw new Error('AI schedule validation failed: No valid schedule entries found.');
+    }
+
+    return validatedSchedule;
   } catch (error) {
-    console.error('Gemini Daily Planner Error:', error);
+    console.error('Gemini Daily Planner Error:', error.message);
     throw new Error(`AI Daily Planner failed: ${error.message}`);
   }
 };

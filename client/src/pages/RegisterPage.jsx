@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { User, Mail, Lock, AlertCircle, ArrowRight } from 'lucide-react';
+import { User, Mail, Lock, AlertCircle, CheckCircle, ArrowRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const RegisterPage = () => {
@@ -9,6 +9,7 @@ const RegisterPage = () => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
   const { register } = useAuth();
@@ -32,10 +33,19 @@ const RegisterPage = () => {
     try {
       setLoading(true);
       setError('');
+      setSuccess('');
       await register(name, email, password, confirmPassword);
-      navigate('/dashboard');
+      setSuccess('Account created successfully! Redirecting to login...');
+      setTimeout(() => {
+        navigate('/login', {
+          state: {
+            successMessage: 'Account created successfully! Please sign in with your credentials.',
+            registeredEmail: email.trim(),
+          },
+        });
+      }, 1000);
     } catch (err) {
-      setError(err.message || 'Registration failed. Please try again.');
+      setError(err.message || 'Email already registered');
     } finally {
       setLoading(false);
     }
@@ -53,6 +63,13 @@ const RegisterPage = () => {
             Start automating your task daily planning in seconds
           </p>
         </div>
+
+        {success && (
+          <div className="mb-6 p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300 text-sm rounded-xl flex items-center gap-2">
+            <CheckCircle className="w-4 h-4 shrink-0" />
+            <span>{success}</span>
+          </div>
+        )}
 
         {error && (
           <div className="mb-6 p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-400 text-sm rounded-xl flex items-center gap-2">
